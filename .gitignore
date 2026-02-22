@@ -1,0 +1,29 @@
+# .venv
+.venv
+__pycache__
+
+# Data
+.data
+*.npz
+*.json
+
+# Results
+results
+/reports
+/.agent
+/.models
+
+# Logs
+logs
+
+# Temporary files
+*.tmp
+*.log
+
+# IDE
+.idea
+.vscode
+
+# System
+.DS_Store
+Thumbs.db
