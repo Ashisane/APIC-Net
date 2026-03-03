@@ -15,7 +15,7 @@ CONFIG = {
     "learning_rate": 0.001,
     "optimizer": "Adam",
     "batch_size": 32,
-    "fl_rounds": 25,
+    "fl_rounds": 50,
     "local_epochs": 2,
     "num_clients": 6,
     "lambda_physics": 0.6,

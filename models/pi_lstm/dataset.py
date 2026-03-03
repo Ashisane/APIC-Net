@@ -15,7 +15,7 @@ class VSMDataset(Dataset):
     Inputs: [omega, p, v_dc, omega_C_received, p_star, v_ref]
     Targets: [omega(t+1), delta(t+1)]
     """
-    def __init__(self, data_file: str, meta_file: str, split: str = "train", window_size: int = 20, stride: int = 1):
+    def __init__(self, data_file: str, meta_file: str, split: str = "train", window_size: int = 20, stride: int = 10):
         super().__init__()
         self.window_size = window_size
         
@@ -29,15 +29,27 @@ class VSMDataset(Dataset):
         with open(meta_file, 'r') as f:
             self.metadata = json.load(f)["scenarios"]
             
-        # Splitting indices
+        # Shuffle scenarios with fixed seed so all attack types appear in every split
         n_scenarios = self.recording.shape[0]
+        shuffle_idx = np.random.RandomState(42).permutation(n_scenarios)
+        self.recording = self.recording[shuffle_idx]
+        self.labels = self.labels[shuffle_idx]
+        self.attack_types_arr = self.attack_types_arr[shuffle_idx]
+        self.metadata = [self.metadata[i] for i in shuffle_idx]
+        
+        # Splitting indices
         n_train = int(n_scenarios * 0.7)
         n_val = int(n_scenarios * 0.15)
         
-        # Fit scaler ONLY on train data to prevent data leakage
-        train_data = self.recording[0:n_train].reshape(-1, self.recording.shape[2])
-        self.mean = np.mean(train_data, axis=0)
-        self.std = np.std(train_data, axis=0)
+        # Fit scaler on NORMAL train timesteps only (standard anomaly detection practice).
+        # Including attack timesteps inflates omega std by 2.25×, compressing normal variation
+        # and inverting anomaly score distributions.
+        train_rec = self.recording[0:n_train]
+        train_lbl = self.labels[0:n_train]
+        normal_mask = train_lbl == 0  # (n_train, n_steps) boolean
+        normal_data = train_rec[normal_mask]  # (N_normal_timesteps, 8)
+        self.mean = np.mean(normal_data, axis=0)
+        self.std = np.std(normal_data, axis=0)
         # Avoid div by zero
         self.std[self.std == 0] = 1.0
         
