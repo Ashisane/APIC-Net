@@ -59,12 +59,12 @@ echo ">>> Step 1: Setting up Python environment"
     source .venv/bin/activate
 
     echo ""
-    echo "=== Installing PyTorch ==="
+    echo "=== Installing PyTorch (CUDA 12.1 for A100) ==="
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
     echo ""
-    echo "=== Installing other deps ==="
-    pip install numpy scikit-learn matplotlib pandas
+    echo "=== Installing all dependencies from requirements.txt ==="
+    pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cu121 --extra-index-url https://pypi.org/simple/
 
     echo ""
     echo "=== Installed packages ==="
