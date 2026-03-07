@@ -5,16 +5,16 @@
 mkdir -p logs results/plots
 
 echo "=== Step 1: Generate dataset ==="
-python -m simulation.generate_dataset 2>&1 | tee logs/01_dataset.log
+python3 -m simulation.generate_dataset 2>&1 | tee logs/01_dataset.log
 
 echo "=== Step 2: Standard training (50 rounds) ==="
-python -m models.pi_lstm.train 2>&1 | tee logs/02_train_standard.log
+python3 -m models.pi_lstm.train 2>&1 | tee logs/02_train_standard.log
 
 echo "=== Step 3: Diagnostic ==="
-python -m models.pi_lstm.diagnostic 2>&1 | tee logs/03_diagnostic.log
+python3 -m models.pi_lstm.diagnostic 2>&1 | tee logs/03_diagnostic.log
 
 echo "=== Step 4: Normal-only training (50 rounds) ==="
-python -m models.pi_lstm.train_normal_only 2>&1 | tee logs/04_train_normal_only.log
+python3 -m models.pi_lstm.train_normal_only 2>&1 | tee logs/04_train_normal_only.log
 
 echo "=== Step 5: Dump results ==="
 echo "--- pi_lstm_results.json ---" | tee logs/05_results.log
