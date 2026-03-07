@@ -1,7 +1,8 @@
 #!/bin/bash
-# Run the PI-LSTM pipeline. Install deps yourself first.
+# Run the PI-LSTM pipeline. Activate venv, then run all steps.
 # Usage: ./run_pipeline.sh
 
+source .venv/bin/activate
 mkdir -p logs results/plots
 
 echo "=== Step 1: Generate dataset ==="
