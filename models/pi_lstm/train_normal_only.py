@@ -200,7 +200,7 @@ def evaluate_and_save(server, val_loaders, test_loaders, device, round_losses, r
 
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")  # CPU is faster for this tiny model
     print(f"Using device: {device}")
     print("MODE: Normal-only training (training ONLY on label=0 samples)")
     
