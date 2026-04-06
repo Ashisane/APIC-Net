@@ -8,7 +8,8 @@ __pycache__
 *.json
 
 # Results
-results
+results/*.json
+results/*.pt
 /reports
 /.agent
 /.models
@@ -19,6 +20,7 @@ logs
 # Temporary files
 *.tmp
 *.log
+tmp_residual_check.py
 
 # IDE
 .idea
