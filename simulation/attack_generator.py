@@ -3,6 +3,12 @@ attack_generator.py — Generates randomised attack parameters and injects
 attacks into VSM simulation signals.
 
 Supports 4 attack types × 4 waveforms as defined in DATASET_SPEC.md.
+
+V2 changes (TASK 04 — DATASET_FIX.md):
+  - freq: unchanged (1-5 rad/s, SNR=1.4× — realistic)
+  - power: calibrated to 1.5-4× normal_omega_std (0.285-0.76 rad/s)
+  - coi: calibrated additive bias with slow ramp (0.156-0.52 rad/s)
+  - voltage: unchanged (inherently large-disturbance via controller nonlinearity)
 """
 
 import numpy as np
@@ -16,6 +22,13 @@ from configs.simulation_config import (
     ATTACK_AMP_RANGE, ATTACK_TRIG_RANGE, ATTACK_DUR_RANGE,
     N_VSM,
 )
+
+# ── V2 calibration constants (from dataset audit TASK 03C) ──
+NORMAL_OMEGA_STD = 0.19   # per-VSM normal omega deviation std [rad/s]
+NORMAL_R4_STD    = 0.52   # normal |omega_C - omega| std [rad/s]
+
+POWER_AMP_RANGE  = (1.5 * NORMAL_OMEGA_STD, 4.0 * NORMAL_OMEGA_STD)  # 0.285–0.76
+COI_BIAS_RANGE   = (1.5 * NORMAL_R4_STD,    4.0 * NORMAL_R4_STD)     # 0.78–2.08
 
 
 def generate_attack_params(
@@ -42,7 +55,6 @@ def generate_attack_params(
 
     assert attack_type in ATTACK_TYPES, f"Unknown attack type: {attack_type}"
 
-    amplitude    = rng.uniform(*ATTACK_AMP_RANGE)
     trigger_time = rng.uniform(*ATTACK_TRIG_RANGE)
     duration     = rng.uniform(*ATTACK_DUR_RANGE)
     waveform     = rng.choice(ATTACK_WAVEFORMS)
@@ -50,6 +62,17 @@ def generate_attack_params(
 
     if target_vsm is None:
         target_vsm = int(rng.integers(0, N_VSM))
+
+    # ── Attack-type-specific amplitude ──
+    if attack_type == "power":
+        # V2: calibrated to 1.5-4× normal_omega_std
+        amplitude = rng.uniform(*POWER_AMP_RANGE)
+    elif attack_type == "coi":
+        # V2: bias ramp amplitude calibrated to 0.3-1.0× normal_r4_std
+        amplitude = rng.uniform(*COI_BIAS_RANGE)
+    else:
+        # freq and voltage: unchanged from V1 (1-5 rad/s)
+        amplitude = rng.uniform(*ATTACK_AMP_RANGE)
 
     # Precompute step indices for efficiency
     trigger_step = int(trigger_time / DT)
@@ -103,26 +126,49 @@ def make_attack_fn(params: dict):
 
     Returns a function with signature: (t_idx, signals_dict) → signals_dict
     that can be passed directly to VSMSimulator.simulate_scenario().
+
+    V2: COI uses slow bias ramp instead of waveform-based additive injection.
     """
     attack_type = params["attack_type"]
     target_vsm  = params["target_vsm"]
 
-    # Map attack types to signal keys
-    SIGNAL_MAP = {
-        "freq":    "omega",      # corrupts ω_j
-        "coi":     "omega_C",    # corrupts ω_C received
-        "power":   "p_star",     # corrupts p*_j
-        "voltage": "v_ref",      # corrupts v_ref
-    }
-    signal_key = SIGNAL_MAP[attack_type]
+    if attack_type == "coi":
+        # ── V2: COI random walk bias ──
+        # Random walk drift applied to omega_C — unpredictable, low correlation.
+        bias_amplitude = params["amplitude"]
+        trigger_step   = params["trigger_step"]
+        end_step       = params["end_step"]
+        duration_steps = end_step - trigger_step
 
-    def attack_fn(t_idx: int, signals: dict) -> dict:
-        a = compute_attack_signal(t_idx, params)
-        if a != 0.0:
-            signals[signal_key][target_vsm] += a
-        return signals
+        # Pre-generate random walk, clipped to amplitude range
+        rng_walk = np.random.default_rng(hash((trigger_step, target_vsm, int(bias_amplitude * 1000))) % (2**31))
+        steps = rng_walk.standard_normal(duration_steps) * 0.18
+        bias = np.cumsum(steps)
+        bias = np.clip(bias, -bias_amplitude, bias_amplitude)
 
-    return attack_fn
+        def attack_fn(t_idx: int, signals: dict) -> dict:
+            if trigger_step <= t_idx < end_step:
+                idx = t_idx - trigger_step
+                signals["omega_C"][target_vsm] += bias[idx]
+            return signals
+
+        return attack_fn
+    else:
+        # ── Standard additive injection (freq, power, voltage) ──
+        SIGNAL_MAP = {
+            "freq":    "omega",
+            "power":   "p_star",
+            "voltage": "v_ref",
+        }
+        signal_key = SIGNAL_MAP[attack_type]
+
+        def attack_fn(t_idx: int, signals: dict) -> dict:
+            a = compute_attack_signal(t_idx, params)
+            if a != 0.0:
+                signals[signal_key][target_vsm] += a
+            return signals
+
+        return attack_fn
 
 
 def get_attack_label_array(params: dict) -> np.ndarray:
@@ -147,7 +193,7 @@ if __name__ == "__main__":
 
     for atype in ATTACK_TYPES:
         p = generate_attack_params(atype, target_vsm=0, rng=rng)
-        print(f"\n{atype}: amp={p['amplitude']:.2f}, "
+        print(f"\n{atype}: amp={p['amplitude']:.4f}, "
               f"trigger={p['trigger_time']:.2f}s, "
               f"dur={p['duration']:.2f}s, "
               f"waveform={p['waveform']}, "
@@ -155,7 +201,7 @@ if __name__ == "__main__":
 
         # Test attack signal at a few timesteps
         vals = [compute_attack_signal(t, p) for t in range(0, N_STEPS, 200)]
-        print(f"  Signal samples (every 200 steps): {[f'{v:.2f}' for v in vals]}")
+        print(f"  Signal samples (every 200 steps): {[f'{v:.4f}' for v in vals]}")
 
         # Test label array
         labels = get_attack_label_array(p)

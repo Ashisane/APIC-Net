@@ -330,7 +330,7 @@ def plot_samples(scenarios: list[dict], plots_dir: str, n_samples: int = 2):
             axes[idx].legend(fontsize=7, ncol=4)
             axes[idx].set_title(
                 f"{atype_scenarios[idx]['scenario_id']} | "
-                f"amp={p['amplitude']:.2f}, wf={p['waveform']}, "
+                f"amp={p['amplitude']:.4f}, wf={p['waveform']}, "
                 f"VSM{p['target_vsm']}"
             )
         axes[-1].set_xlabel("Time [s]")
