@@ -85,11 +85,13 @@ def generate_attack_scenarios(n: int, seed: int = 1000) -> list[dict]:
             target_vsm = type_count % N_VSM
 
             params = generate_attack_params(atype, target_vsm=target_vsm, rng=rng)
-            attack_fn = make_attack_fn(params)
+            attack_fn, coi_spoof_fn = make_attack_fn(params)
 
             load_factors = rng.uniform(*LOAD_RANGE, size=N_VSM)
             recording = sim.simulate_scenario(
-                load_factors=load_factors, attack_fn=attack_fn
+                load_factors=load_factors,
+                attack_fn=attack_fn,
+                coi_spoof_fn=coi_spoof_fn,
             )
 
             if recording is None:

@@ -4,10 +4,12 @@ attacks into VSM simulation signals.
 
 Supports 4 attack types × 4 waveforms as defined in DATASET_SPEC.md.
 
-V2 changes (TASK 04 — DATASET_FIX.md):
+V2 changes (TASK 04 — DATASET_FIX.md + Option A COI fix):
   - freq: unchanged (1-5 rad/s, SNR=1.4× — realistic)
   - power: calibrated to 1.5-4× normal_omega_std (0.285-0.76 rad/s)
-  - coi: calibrated additive bias with slow ramp (0.156-0.52 rad/s)
+  - coi: UPSTREAM spoof — corrupts VSM j's OUTGOING omega to aggregator
+         (not what j receives back). r4 at j is no longer a direct readout.
+         Other VSMs detect the inconsistency via their r4.
   - voltage: unchanged (inherently large-disturbance via controller nonlinearity)
 """
 
@@ -28,7 +30,11 @@ NORMAL_OMEGA_STD = 0.19   # per-VSM normal omega deviation std [rad/s]
 NORMAL_R4_STD    = 0.52   # normal |omega_C - omega| std [rad/s]
 
 POWER_AMP_RANGE  = (1.5 * NORMAL_OMEGA_STD, 4.0 * NORMAL_OMEGA_STD)  # 0.285–0.76
-COI_BIAS_RANGE   = (1.5 * NORMAL_R4_STD,    4.0 * NORMAL_R4_STD)     # 0.78–2.08
+# COI spoof range accounts for 1/6 dilution in 6-VSM aggregation.
+# omega_C shift at other VSMs = spoof/N_VSM, so spoof = N_VSM × target_effect.
+# target_effect = 1.5-4.0 × NORMAL_R4_STD = 0.78-2.08 rad/s
+# spoof = 6 × (0.78-2.08) = 4.68-12.48 rad/s
+COI_SPOOF_RANGE  = (6 * 1.5 * NORMAL_R4_STD,  6 * 4.0 * NORMAL_R4_STD)  # 4.68–12.48
 
 
 def generate_attack_params(
@@ -68,8 +74,8 @@ def generate_attack_params(
         # V2: calibrated to 1.5-4× normal_omega_std
         amplitude = rng.uniform(*POWER_AMP_RANGE)
     elif attack_type == "coi":
-        # V2: bias ramp amplitude calibrated to 0.3-1.0× normal_r4_std
-        amplitude = rng.uniform(*COI_BIAS_RANGE)
+        # V2 Option A: upstream spoof amplitude (same calibration range)
+        amplitude = rng.uniform(*COI_SPOOF_RANGE)
     else:
         # freq and voltage: unchanged from V1 (1-5 rad/s)
         amplitude = rng.uniform(*ATTACK_AMP_RANGE)
@@ -122,37 +128,48 @@ def compute_attack_signal(t_idx: int, params: dict) -> float:
 
 def make_attack_fn(params: dict):
     """
-    Create a closure that injects attacks into simulation signals.
+    Create injection closure(s) for one attack scenario.
 
-    Returns a function with signature: (t_idx, signals_dict) → signals_dict
-    that can be passed directly to VSMSimulator.simulate_scenario().
+    Returns
+    -------
+    (attack_fn, coi_spoof_fn) tuple:
+      - Non-COI: (callable(t_idx, signals_dict)->signals_dict, None)
+      - COI:     (None, callable(t_idx, omega_array)->omega_array)
 
-    V2: COI uses slow bias ramp instead of waveform-based additive injection.
+    Option A — COI upstream spoof:
+        coi_spoof_fn corrupts VSM j's omega BEFORE COI aggregation.
+        All other VSMs receive the corrupted omega_C.
+        r4 at VSM j is NOT a direct readout of the injected bias
+        (diluted by 5/6 of true omegas in aggregation).
+        Label stays on VSM j (the compromised node).
     """
     attack_type = params["attack_type"]
     target_vsm  = params["target_vsm"]
 
     if attack_type == "coi":
-        # ── V2: COI random walk bias ──
-        # Random walk drift applied to omega_C — unpredictable, low correlation.
-        bias_amplitude = params["amplitude"]
-        trigger_step   = params["trigger_step"]
-        end_step       = params["end_step"]
-        duration_steps = end_step - trigger_step
+        # ── Option A: COI upstream spoof ──
+        spoof_amplitude = params["amplitude"]
+        trigger_step    = params["trigger_step"]
+        end_step        = params["end_step"]
+        duration_steps  = max(end_step - trigger_step, 1)
 
-        # Pre-generate random walk, clipped to amplitude range
-        rng_walk = np.random.default_rng(hash((trigger_step, target_vsm, int(bias_amplitude * 1000))) % (2**31))
+        # Pre-generate random walk clipped to spoof_amplitude
+        rng_walk = np.random.default_rng(
+            hash((trigger_step, target_vsm, int(spoof_amplitude * 1000))) % (2**31)
+        )
         steps = rng_walk.standard_normal(duration_steps) * 0.18
-        bias = np.cumsum(steps)
-        bias = np.clip(bias, -bias_amplitude, bias_amplitude)
+        bias  = np.cumsum(steps)
+        bias  = np.clip(bias, -spoof_amplitude, spoof_amplitude)
 
-        def attack_fn(t_idx: int, signals: dict) -> dict:
+        def coi_spoof_fn(t_idx: int, omega_for_coi: np.ndarray) -> np.ndarray:
+            """Corrupt VSM j's omega BEFORE COI aggregation."""
             if trigger_step <= t_idx < end_step:
                 idx = t_idx - trigger_step
-                signals["omega_C"][target_vsm] += bias[idx]
-            return signals
+                omega_for_coi = omega_for_coi.copy()
+                omega_for_coi[target_vsm] += bias[idx]
+            return omega_for_coi
 
-        return attack_fn
+        return None, coi_spoof_fn
     else:
         # ── Standard additive injection (freq, power, voltage) ──
         SIGNAL_MAP = {
@@ -168,7 +185,7 @@ def make_attack_fn(params: dict):
                 signals[signal_key][target_vsm] += a
             return signals
 
-        return attack_fn
+        return attack_fn, None
 
 
 def get_attack_label_array(params: dict) -> np.ndarray:

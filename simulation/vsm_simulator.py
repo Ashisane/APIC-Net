@@ -4,6 +4,12 @@ vsm_simulator.py — Core Euler-integration simulator for 6 VSMs on IEEE 39-bus.
 Implements the swing equation, COI computation, and simplified voltage/power
 models from PHYSICS_SPEC.md using forward Euler discretisation.
 
+V2 note (Option A COI fix): simulate_scenario accepts an optional coi_spoof_fn
+that runs BEFORE COI aggregation. This lets the COI attack corrupt VSM j's
+outgoing omega contribution to the aggregator, rather than what j receives back.
+Result: all other VSMs detect the inconsistency via their r4, while VSM j's
+own r4 is not a direct readout of the injected bias.
+
 Unit convention:
   - Frequency: ω in rad/s (SI), normalised internally for swing equation
   - Power: p.u. on 100 MVA base
@@ -67,14 +73,19 @@ class VSMSimulator:
         self,
         load_factors: np.ndarray | None = None,
         attack_fn=None,
+        coi_spoof_fn=None,
     ) -> np.ndarray:
         """
         Run one 10-second scenario.
 
         Parameters
         ----------
-        load_factors : (N_VSM,) array of p.u. load multipliers, or None for random.
-        attack_fn : callable(t_idx, signals_dict) → signals_dict  or None.
+        load_factors  : (N_VSM,) array of p.u. load multipliers, or None for random.
+        attack_fn     : callable(t_idx, signals_dict) → signals_dict  or None.
+                        Applied AFTER COI aggregation (freq, power, voltage attacks).
+        coi_spoof_fn  : callable(t_idx, omega_array) → omega_array  or None.
+                        Applied BEFORE COI aggregation. Used for COI attacks to
+                        corrupt VSM j's outgoing omega without touching local state.
 
         Returns
         -------
@@ -104,8 +115,16 @@ class VSMSimulator:
 
         for t in range(N_STEPS):
             p_load = p_load_dynamic[t]
-            # ── COI frequency (Eq. 3) — from true state ──
-            omega_C_true = self._compute_coi(omega)
+
+            # ── COI spoof (pre-aggregation, Option A COI attack) ──
+            # If a coi_spoof_fn is provided, corrupt the omega array used
+            # for COI aggregation only. True physical omega is unchanged.
+            omega_for_coi = omega.copy()
+            if coi_spoof_fn is not None:
+                omega_for_coi = coi_spoof_fn(t, omega_for_coi)
+
+            # ── COI frequency (Eq. 3) — from (possibly spoofed) state ──
+            omega_C_true = self._compute_coi(omega_for_coi)
 
             # ── Electrical power output (physical) ──
             # P_e = P_load * (V/V_nom)² + K_droop * (ω - ω*) / ω*
